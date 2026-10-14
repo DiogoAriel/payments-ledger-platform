@@ -1,5 +1,6 @@
 # DevSecOps pipeline: every control runs on every change, findings fail the build.
 # Secret detection -> SAST -> dependency and SBOM -> IaC -> container image scan.
+# Actions are pinned to commit SHAs (tag kept as a comment) so a moved tag cannot change what runs.
 name: security
 
 on:
@@ -18,10 +19,10 @@ jobs:
     name: secret detection (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -30,8 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     container: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
-      - run: semgrep ci --config p/csharp --config p/secrets --config p/owasp-top-ten
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: semgrep ci --config p/csharp --config p/secrets --config p/owasp-top-ten --config p/github-actions
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
@@ -39,9 +40,9 @@ jobs:
     name: dependencies and SBOM (trivy, syft)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Vulnerable dependencies and misconfigurations in the repository
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           scan-type: fs
           scanners: vuln,misconfig,secret
@@ -49,7 +50,7 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
       - name: Software bill of materials (CycloneDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           format: cyclonedx-json
           output-file: sbom.cdx.json
@@ -59,8 +60,8 @@ jobs:
     name: infrastructure as code (checkov)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bridgecrewio/checkov-action@v12
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: bridgecrewio/checkov-action@6f26dc90000b74feb589a906cdfae540f5119895 # v12.3134.0
         with:
           directory: deploy
           framework: terraform,helm,dockerfile
@@ -71,11 +72,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [secrets, sast]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build image
         run: docker build -f src/Ledger.Api/Dockerfile -t payments-ledger-api:${{ github.sha }} .
       - name: Scan image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           image-ref: payments-ledger-api:${{ github.sha }}
           severity: HIGH,CRITICAL
@@ -85,6 +86,6 @@ jobs:
           output: trivy-image.sarif
       - name: Upload findings to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@9f759ee644a3e7c15c1390abf49868036c00067b # v3
         with:
           sarif_file: trivy-image.sarif
