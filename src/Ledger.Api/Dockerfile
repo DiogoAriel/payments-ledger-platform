@@ -15,7 +15,7 @@ RUN dotnet publish src/Ledger.Api/Ledger.Api.csproj -c Release -o /app --no-rest
 # no package manager, no perl; it removed every HIGH/CRITICAL finding trivy reported on the Debian
 # base. It runs as the non-root "app" user (uid 1654). Liveness and readiness are probed by the
 # orchestrator on /health/live and /health/ready (see deploy/helm), not by a Docker HEALTHCHECK.
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-noble-chiseled AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS runtime
 WORKDIR /app
 COPY --from=build /app .
 USER app
