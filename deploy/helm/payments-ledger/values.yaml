@@ -1,0 +1,58 @@
+# Default values. Secrets (connection string, webhook secrets) come from an existing Kubernetes Secret
+# created by the platform team or by External Secrets; the chart never embeds them.
+replicaCount: 2
+
+image:
+  repository: ghcr.io/diogoariel/payments-ledger-api
+  tag: ""          # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+existingSecret: payments-ledger-secrets   # keys: ConnectionStrings__Ledger, Webhooks__Providers__<name>__Secret
+
+env:
+  ASPNETCORE_ENVIRONMENT: Production
+  Database__Provider: Postgres
+  Database__AutoMigrate: "false"           # migrations run as a job, not on pod start
+  Messaging__Kafka__BootstrapServers: kafka:9092
+  Otel__ServiceName: payments-ledger-api
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  host: ledger.example.internal
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podDisruptionBudget:
+  minAvailable: 1

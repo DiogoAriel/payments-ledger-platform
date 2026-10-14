@@ -1,0 +1,90 @@
+# DevSecOps pipeline: every control runs on every change, findings fail the build.
+# Secret detection -> SAST -> dependency and SBOM -> IaC -> container image scan.
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"   # weekly rescan so new CVEs surface even without code changes
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  secrets:
+    name: secret detection (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    name: static analysis (semgrep)
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep ci --config p/csharp --config p/secrets --config p/owasp-top-ten
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+  dependencies:
+    name: dependencies and SBOM (trivy, syft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vulnerable dependencies and misconfigurations in the repository
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Software bill of materials (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: sbom.cdx.json
+
+  iac:
+    name: infrastructure as code (checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: deploy
+          framework: terraform,helm,dockerfile
+          soft_fail: false
+
+  image:
+    name: container image (trivy)
+    runs-on: ubuntu-latest
+    needs: [secrets, sast]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f src/Ledger.Api/Dockerfile -t payments-ledger-api:${{ github.sha }} .
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: payments-ledger-api:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-image.sarif
+      - name: Upload findings to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif

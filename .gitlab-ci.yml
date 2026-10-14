@@ -1,0 +1,66 @@
+# Same controls as .github/workflows, expressed for GitLab CI. Stages run in order; any failure stops the pipeline.
+stages: [build, test, security, package]
+
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+default:
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+
+build:
+  stage: build
+  script:
+    - dotnet restore PaymentsLedger.sln
+    - dotnet build PaymentsLedger.sln -c Release --no-restore
+  artifacts:
+    paths: [src/**/bin/Release, tests/**/bin/Release]
+    expire_in: 1 hour
+
+test:
+  stage: test
+  needs: [build]
+  script:
+    - dotnet test PaymentsLedger.sln -c Release --no-build --logger "junit;LogFilePath=TestResults/{assembly}.xml"
+  artifacts:
+    reports:
+      junit: TestResults/*.xml
+
+secret-detection:
+  stage: security
+  image: zricethezav/gitleaks:latest
+  script: [gitleaks detect --source . --no-banner --redact]
+
+sast:
+  stage: security
+  image: semgrep/semgrep
+  script: [semgrep ci --config p/csharp --config p/secrets --config p/owasp-top-ten]
+
+dependency-scan:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .
+    - trivy fs --format cyclonedx --output sbom.cdx.json .
+  artifacts:
+    paths: [sbom.cdx.json]
+    reports:
+      cyclonedx: sbom.cdx.json
+
+iac-scan:
+  stage: security
+  image: bridgecrew/checkov:latest
+  script: [checkov -d deploy --framework terraform helm dockerfile]
+
+package:
+  stage: package
+  image: docker:27
+  services: [docker:27-dind]
+  needs: [test, secret-detection, sast, dependency-scan, iac-scan]
+  script:
+    - docker build -f src/Ledger.Api/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA .
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

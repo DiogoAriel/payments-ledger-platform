@@ -1,0 +1,36 @@
+# Local working memory and operation history: never committed.
+_local/
+
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+TestResults/
+coverage/
+*.coverage
+*.trx
+
+# Local databases and secrets
+*.db
+*.db-shm
+*.db-wal
+appsettings.Local.json
+.env
+*.pem
+*.key
+
+# Terraform
+deploy/terraform/**/.terraform/
+deploy/terraform/**/*.tfstate
+deploy/terraform/**/*.tfstate.backup
+deploy/terraform/**/.terraform.lock.hcl
+deploy/terraform/**/*.tfvars
+
+# Tooling
+node_modules/
+.DS_Store
+Thumbs.db

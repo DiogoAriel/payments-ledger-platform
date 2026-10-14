@@ -1,0 +1,17 @@
+<Project>
+  <!-- Settings shared by every project in the solution. Keeps the .csproj files small and consistent. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <!-- Analyzer noise that does not improve this codebase. Each one is a deliberate choice. -->
+    <NoWarn>$(NoWarn);CA1848;CA2007;CA1031;CA1062;CA1812;CA1716;CA2254;CA1305;CA1034</NoWarn>
+  </PropertyGroup>
+</Project>

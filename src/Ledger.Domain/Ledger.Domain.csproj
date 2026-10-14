@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The domain has no dependencies on frameworks or infrastructure. It only knows about money, accounts and entries. -->
+  <PropertyGroup>
+    <RootNamespace>Ledger.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>
