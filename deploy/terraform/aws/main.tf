@@ -68,6 +68,12 @@ resource "aws_db_parameter_group" "ledger" {
     name  = "log_min_duration_statement"
     value = "1000"
   }
+
+  # Encryption in transit is mandatory; the connection string uses SSL Mode=Require.
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
 }
 
 resource "aws_db_instance" "ledger" {
@@ -103,9 +109,54 @@ resource "aws_ecs_cluster" "ledger" {
   }
 }
 
+# One customer-managed key for every log group of the service; CloudWatch Logs must be allowed
+# to use it, scoped to log groups in this account and region.
+resource "aws_kms_key" "logs" {
+  description             = "${local.name} log encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+  policy                  = data.aws_iam_policy_document.logs_key.json
+}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "logs_key" {
+  statement {
+    sid       = "AccountAdministration"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  statement {
+    sid = "CloudWatchLogs"
+    actions = [
+      "kms:Encrypt*",
+      "kms:Decrypt*",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:Describe*",
+    ]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.region}.amazonaws.com"]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:*"]
+    }
+  }
+}
+
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/ecs/${local.name}"
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.logs.arn
 }
 
 resource "aws_iam_role" "task_execution" {
@@ -373,6 +424,7 @@ resource "aws_wafv2_web_acl_association" "api" {
 resource "aws_cloudwatch_log_group" "waf" {
   name              = "aws-waf-logs-${local.name}"
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.logs.arn
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "api" {
