@@ -171,9 +171,9 @@ resource "aws_ecs_task_definition" "api" {
 
   container_definitions = jsonencode([
     {
-      name      = "api"
-      image     = var.image
-      essential = true
+      name         = "api"
+      image        = var.image
+      essential    = true
       portMappings = [{ containerPort = 8080, protocol = "tcp" }]
       environment = [
         { name = "ASPNETCORE_ENVIRONMENT", value = "Production" },
@@ -271,32 +271,10 @@ resource "aws_wafv2_web_acl" "api" {
     allow {}
   }
 
-  rule {
-    name     = "aws-managed-common"
-    priority = 1
-
-    override_action {
-      none {}
-    }
-
-    statement {
-      managed_rule_group_statement {
-        name        = "AWSManagedRulesCommonRuleSet"
-        vendor_name = "AWS"
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "${local.name}-common"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  # Known bad inputs (includes the Log4j JNDI patterns) on top of the common rule set.
+  # Known bad inputs first (includes the Log4j JNDI patterns), then the common rule set.
   rule {
     name     = "aws-managed-known-bad-inputs"
-    priority = 2
+    priority = 1
 
     override_action {
       none {}
@@ -316,6 +294,28 @@ resource "aws_wafv2_web_acl" "api" {
     }
   }
 
+  rule {
+    name     = "aws-managed-common"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-common"
+      sampled_requests_enabled   = true
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = local.name
@@ -326,6 +326,17 @@ resource "aws_wafv2_web_acl" "api" {
 resource "aws_wafv2_web_acl_association" "api" {
   resource_arn = aws_lb.api.arn
   web_acl_arn  = aws_wafv2_web_acl.api.arn
+}
+
+# WAF logs go to CloudWatch; the log group name must start with "aws-waf-logs-".
+resource "aws_cloudwatch_log_group" "waf" {
+  name              = "aws-waf-logs-${local.name}"
+  retention_in_days = 30
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "api" {
+  resource_arn            = aws_wafv2_web_acl.api.arn
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
 }
 
 resource "aws_lb_target_group" "api" {

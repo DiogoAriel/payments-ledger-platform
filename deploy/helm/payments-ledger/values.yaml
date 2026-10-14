@@ -44,7 +44,7 @@ autoscaling:
 
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1000
+  runAsUser: 1654   # the "app" user of the official .NET images
   seccompProfile:
     type: RuntimeDefault
 

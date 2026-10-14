@@ -10,11 +10,11 @@ RUN dotnet restore src/Ledger.Api/Ledger.Api.csproj
 COPY src/ src/
 RUN dotnet publish src/Ledger.Api/Ledger.Api.csproj -c Release -o /app --no-restore
 
-# Runtime: non-root user, no SDK, no shell tools. Liveness and readiness are probed by the
-# orchestrator on /health/live and /health/ready (see deploy/helm), not by a Docker HEALTHCHECK.
+# Runtime: the non-root "app" user that ships with the .NET 8 images (uid 1654), no SDK, no shell
+# tools. Liveness and readiness are probed by the orchestrator on /health/live and /health/ready
+# (see deploy/helm), not by a Docker HEALTHCHECK.
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
-RUN groupadd --system app && useradd --system --gid app --no-create-home app
 COPY --from=build /app .
 USER app
 ENV ASPNETCORE_URLS=http://+:8080 \
