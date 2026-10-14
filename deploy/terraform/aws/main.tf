@@ -53,10 +53,28 @@ resource "aws_security_group" "db" {
   }
 }
 
+# Query logging: DDL statements and anything slower than one second go to the PostgreSQL log,
+# which is exported to CloudWatch below. Full statement logging would leak amounts and ids.
+resource "aws_db_parameter_group" "ledger" {
+  name   = local.name
+  family = "postgres16"
+
+  parameter {
+    name  = "log_statement"
+    value = "ddl"
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  }
+}
+
 resource "aws_db_instance" "ledger" {
   identifier                      = local.name
   engine                          = "postgres"
   engine_version                  = "16"
+  parameter_group_name            = aws_db_parameter_group.ledger.name
   instance_class                  = var.db_instance_class
   allocated_storage               = 50
   storage_encrypted               = true
@@ -87,7 +105,7 @@ resource "aws_ecs_cluster" "ledger" {
 
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/ecs/${local.name}"
-  retention_in_days = 30
+  retention_in_days = 365
 }
 
 resource "aws_iam_role" "task_execution" {
@@ -316,6 +334,29 @@ resource "aws_wafv2_web_acl" "api" {
     }
   }
 
+  # Anonymous sources (VPNs, proxies, Tor exit nodes) are a poor fit for a payments API.
+  rule {
+    name     = "aws-managed-anonymous-ip"
+    priority = 3
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAnonymousIpList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-anonymous-ip"
+      sampled_requests_enabled   = true
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = local.name
@@ -331,7 +372,7 @@ resource "aws_wafv2_web_acl_association" "api" {
 # WAF logs go to CloudWatch; the log group name must start with "aws-waf-logs-".
 resource "aws_cloudwatch_log_group" "waf" {
   name              = "aws-waf-logs-${local.name}"
-  retention_in_days = 30
+  retention_in_days = 365
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "api" {
