@@ -137,7 +137,11 @@ at. `/health/live` and `/health/ready` (database check) feed the Kubernetes prob
 
 The build itself treats warnings as errors and runs the .NET analyzers at the recommended level.
 During development this pipeline caught a vulnerable `OpenTelemetry.Exporter.OpenTelemetryProtocol`
-version before the first commit, which is exactly what it is there for.
+version before the first commit, a Debian base image full of unused `perl` CVEs (replaced by the
+chiseled image), and a dozen infrastructure findings, which is exactly what it is there for.
+
+Exceptions are explicit: `.checkov.yaml` lists every skipped check with its reason, and the two
+trivy ignores in `deploy/terraform/aws/main.tf` sit next to the resource they cover.
 
 ## Configuration
 

@@ -6,6 +6,16 @@ locals {
   name = "payments-ledger-${var.environment}"
 }
 
+# --- Encryption keys -------------------------------------------------------------------------
+
+# Customer-managed key for data at rest: database storage, Performance Insights and secrets.
+# The default key policy (account root) applies; access is granted through IAM.
+resource "aws_kms_key" "data" {
+  description             = "${local.name} data encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+}
+
 # --- Secrets ---------------------------------------------------------------------------------
 
 resource "random_password" "db" {
@@ -17,6 +27,7 @@ resource "aws_secretsmanager_secret" "db" {
   # checkov:skip=CKV2_AWS_57: the database password is rotated by the platform's rotation job, which also updates this connection string; the Lambda-based rotation is out of scope for the reference project.
   name                    = "${local.name}/database"
   recovery_window_in_days = 7
+  kms_key_id              = aws_kms_key.data.arn
 }
 
 resource "aws_secretsmanager_secret_version" "db" {
@@ -32,6 +43,7 @@ resource "aws_secretsmanager_secret" "webhooks" {
   # checkov:skip=CKV2_AWS_57: webhook secrets are rotated with each provider through its onboarding process, not by an automatic schedule.
   name                    = "${local.name}/webhooks"
   recovery_window_in_days = 7
+  kms_key_id              = aws_kms_key.data.arn
 }
 
 # --- Database --------------------------------------------------------------------------------
@@ -42,15 +54,35 @@ resource "aws_db_subnet_group" "ledger" {
 }
 
 resource "aws_security_group" "db" {
-  name   = "${local.name}-db"
-  vpc_id = var.vpc_id
+  name        = "${local.name}-db"
+  description = "PostgreSQL: accepts connections from the API tasks only"
+  vpc_id      = var.vpc_id
 
   ingress {
+    description     = "PostgreSQL from the API security group"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.api.id]
   }
+}
+
+# Enhanced monitoring publishes OS-level metrics to CloudWatch through this role.
+resource "aws_iam_role" "rds_monitoring" {
+  name = "${local.name}-rds-monitoring"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "monitoring.rds.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+  role       = aws_iam_role.rds_monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
 # Query logging: DDL statements and anything slower than one second go to the PostgreSQL log,
@@ -84,18 +116,28 @@ resource "aws_db_instance" "ledger" {
   instance_class                  = var.db_instance_class
   allocated_storage               = 50
   storage_encrypted               = true
+  kms_key_id                      = aws_kms_key.data.arn
   db_name                         = "ledger"
   username                        = "ledger"
   password                        = random_password.db.result
   db_subnet_group_name            = aws_db_subnet_group.ledger.name
   vpc_security_group_ids          = [aws_security_group.db.id]
-  multi_az                        = var.environment == "prod"
+  multi_az                        = true
   copy_tags_to_snapshot           = true
   backup_retention_period         = 7
-  deletion_protection             = var.environment == "prod"
-  skip_final_snapshot             = var.environment != "prod"
+  deletion_protection             = true
+  skip_final_snapshot             = false
+  final_snapshot_identifier       = "${local.name}-final"
+  auto_minor_version_upgrade      = true
+  monitoring_interval             = 60
+  monitoring_role_arn             = aws_iam_role.rds_monitoring.arn
   performance_insights_enabled    = true
+  performance_insights_kms_key_id = aws_kms_key.data.arn
   enabled_cloudwatch_logs_exports = ["postgresql"]
+
+  # Application access uses IAM tokens where the runtime supports it; the password remains for
+  # tooling and migrations. Enabling it costs nothing and keeps the door open.
+  iam_database_authentication_enabled = true
 }
 
 # --- Compute ---------------------------------------------------------------------------------
@@ -199,10 +241,12 @@ resource "aws_iam_role_policy" "read_secrets" {
 }
 
 resource "aws_security_group" "api" {
-  name   = "${local.name}-api"
-  vpc_id = var.vpc_id
+  name        = "${local.name}-api"
+  description = "API tasks: HTTP from the load balancer, TLS and PostgreSQL out"
+  vpc_id      = var.vpc_id
 
   ingress {
+    description     = "HTTP from the load balancer security group"
     from_port       = 8080
     to_port         = 8080
     protocol        = "tcp"
@@ -215,6 +259,7 @@ resource "aws_security_group" "api" {
   # Narrow the TLS rule to VPC endpoints once they exist in the target VPC.
   #trivy:ignore:AVD-AWS-0104
   egress {
+    description = "TLS to AWS APIs, ECR, Kafka and the OTLP collector"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -223,6 +268,7 @@ resource "aws_security_group" "api" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_db" {
+  description                  = "PostgreSQL to the database security group"
   security_group_id            = aws_security_group.api.id
   referenced_security_group_id = aws_security_group.db.id
   ip_protocol                  = "tcp"
@@ -300,10 +346,12 @@ resource "aws_ecs_service" "api" {
 # --- Load balancer ---------------------------------------------------------------------------
 
 resource "aws_security_group" "alb" {
-  name   = "${local.name}-alb"
-  vpc_id = var.vpc_id
+  name        = "${local.name}-alb"
+  description = "Public load balancer: HTTPS in, API tasks out"
+  vpc_id      = var.vpc_id
 
   ingress {
+    description = "HTTPS from the internet"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -314,6 +362,7 @@ resource "aws_security_group" "alb" {
 # The load balancer may only talk to the API tasks. Declared as a separate rule so the two
 # security groups can reference each other without a cycle.
 resource "aws_vpc_security_group_egress_rule" "alb_to_api" {
+  description                  = "HTTP to the API security group"
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.api.id
   ip_protocol                  = "tcp"
@@ -330,6 +379,7 @@ resource "aws_lb" "api" {
   subnets                    = var.public_subnet_ids
   security_groups            = [aws_security_group.alb.id]
   drop_invalid_header_fields = true
+  enable_deletion_protection = true
 }
 
 # Public-facing ALB behind AWS WAF with the managed common rule set (OWASP-style protections).

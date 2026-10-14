@@ -1,0 +1,14 @@
+# Checkov exceptions. Every entry is a deliberate trade-off for a reference project; each has a
+# reason and should be revisited when the control is implemented. Findings not listed here fail CI.
+skip-check:
+  # Terraform
+  - CKV_AWS_91    # ALB access logs go to the central logging account's bucket, configured outside this module
+  - CKV_AWS_109   # KMS key policies must grant kms:* on the key ("*"); scoped by principal and condition
+  - CKV_AWS_111   # same as above: key policy write access is intrinsic to key administration
+  - CKV_AWS_356   # same as above: key policy resource is the key itself
+  - CKV2_AWS_57   # Secrets Manager rotation is run by the platform rotation job and provider onboarding, not a Lambda here
+  # Helm
+  - CKV_K8S_21    # the release namespace is chosen at install time (helm install -n <ns>); templates do not hardcode it
+  - CKV_K8S_35    # configuration follows the twelve-factor model (environment variables); secrets come from an existing Secret
+  - CKV_K8S_40    # the image runs as the built-in non-root user (uid 1654) of the official .NET images
+  - CKV_K8S_43    # the CD pipeline pins the image by digest in the environment values file; the chart default is a tag

@@ -21,6 +21,8 @@ spec:
       labels:
         {{- include "payments-ledger.selectorLabels" . | nindent 8 }}
     spec:
+      # The API never calls the Kubernetes API, so it does not need a service account token.
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

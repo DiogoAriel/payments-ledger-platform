@@ -4,8 +4,8 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/diogoariel/payments-ledger-api
-  tag: ""          # defaults to .Chart.AppVersion
-  pullPolicy: IfNotPresent
+  tag: ""          # defaults to .Chart.AppVersion; production values pin a digest
+  pullPolicy: Always
 
 existingSecret: payments-ledger-secrets   # keys: ConnectionStrings__Ledger, Webhooks__Providers__<name>__Secret
 
