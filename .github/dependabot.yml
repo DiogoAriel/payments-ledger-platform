@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Wait a week after a release before proposing it: a fresh package is a fresh supply-chain risk.
+    cooldown:
+      default-days: 7
     groups:
       dotnet:
         patterns: ["Microsoft.*", "System.*"]
@@ -13,11 +16,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: /src/Ledger.Api
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: terraform
     directory: /deploy/terraform/aws
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7

@@ -14,6 +14,7 @@ resource "random_password" "db" {
 }
 
 resource "aws_secretsmanager_secret" "db" {
+  # checkov:skip=CKV2_AWS_57: the database password is rotated by the platform's rotation job, which also updates this connection string; the Lambda-based rotation is out of scope for the reference project.
   name                    = "${local.name}/database"
   recovery_window_in_days = 7
 }
@@ -28,6 +29,7 @@ resource "aws_secretsmanager_secret_version" "db" {
 # Webhook secrets are rotated by the provider onboarding process, outside Terraform: the secret
 # exists here so the task role can read it, but its value is never in state or in code.
 resource "aws_secretsmanager_secret" "webhooks" {
+  # checkov:skip=CKV2_AWS_57: webhook secrets are rotated with each provider through its onboarding process, not by an automatic schedule.
   name                    = "${local.name}/webhooks"
   recovery_window_in_days = 7
 }
@@ -137,12 +139,25 @@ resource "aws_security_group" "api" {
     security_groups = [aws_security_group.alb.id]
   }
 
+  # Egress is limited to what the task actually talks to: TLS for Secrets Manager, ECR, Kafka
+  # and the OTLP collector here, and the database through a separate rule below (a separate
+  # resource avoids a dependency cycle between the api and db security groups).
+  # Narrow the TLS rule to VPC endpoints once they exist in the target VPC.
+  #trivy:ignore:AVD-AWS-0104
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_db" {
+  security_group_id            = aws_security_group.api.id
+  referenced_security_group_id = aws_security_group.db.id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
 }
 
 resource "aws_ecs_task_definition" "api" {
@@ -224,15 +239,21 @@ resource "aws_security_group" "alb" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 }
 
+# The load balancer may only talk to the API tasks. Declared as a separate rule so the two
+# security groups can reference each other without a cycle.
+resource "aws_vpc_security_group_egress_rule" "alb_to_api" {
+  security_group_id            = aws_security_group.alb.id
+  referenced_security_group_id = aws_security_group.api.id
+  ip_protocol                  = "tcp"
+  from_port                    = 8080
+  to_port                      = 8080
+}
+
+# Public by design: this is the internet-facing edge of the API, protected by TLS 1.3, WAF and
+# the security group above.
+#trivy:ignore:AVD-AWS-0053
 resource "aws_lb" "api" {
   name                       = local.name
   load_balancer_type         = "application"
@@ -268,6 +289,29 @@ resource "aws_wafv2_web_acl" "api" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-common"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Known bad inputs (includes the Log4j JNDI patterns) on top of the common rule set.
+  rule {
+    name     = "aws-managed-known-bad-inputs"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-known-bad-inputs"
       sampled_requests_enabled   = true
     }
   }
