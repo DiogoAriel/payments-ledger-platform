@@ -1,5 +1,5 @@
 # Multi-stage build: SDK image compiles and publishes, runtime image only carries the output.
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 # .editorconfig travels with the build: it marks EF migrations as generated code for the analyzers.
 COPY Directory.Build.props Directory.Packages.props global.json .editorconfig ./
