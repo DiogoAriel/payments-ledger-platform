@@ -121,6 +121,7 @@ resource "aws_kms_key" "logs" {
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "logs_key" {
+  # checkov:skip=CKV_AWS_356: a KMS key policy must name the key itself as "*"; access is scoped by the principals and the encryption-context condition below.
   statement {
     sid       = "AccountAdministration"
     actions   = ["kms:*"]
