@@ -14,6 +14,46 @@ resource "aws_kms_key" "data" {
   description             = "${local.name} data encryption"
   enable_key_rotation     = true
   deletion_window_in_days = 30
+  policy                  = data.aws_iam_policy_document.data_key.json
+}
+
+# Explicit key policy: the account administers the key; RDS and Secrets Manager use it through
+# grants created on behalf of the task role (kms:ViaService keeps it to those two services).
+data "aws_iam_policy_document" "data_key" {
+  # checkov:skip=CKV_AWS_356: a KMS key policy must name the key itself as "*"
+  # checkov:skip=CKV_AWS_109: key administration statement is intrinsic to a key policy
+  # checkov:skip=CKV_AWS_111: same as above
+  statement {
+    sid       = "AccountAdministration"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  statement {
+    sid = "ServiceUse"
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey",
+      "kms:CreateGrant",
+    ]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.task_execution.arn, aws_iam_role.task.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["rds.${var.region}.amazonaws.com", "secretsmanager.${var.region}.amazonaws.com"]
+    }
+  }
 }
 
 # --- Secrets ---------------------------------------------------------------------------------
